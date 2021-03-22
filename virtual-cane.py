@@ -10,7 +10,6 @@ from threading import Thread
 import importlib.util
 
 
-
 try:
     ##########   tflite     ##################
     # Define and parse input arguments
@@ -34,7 +33,7 @@ try:
     GRAPH_NAME = args.graph
     LABELMAP_NAME = args.labels
     min_conf_threshold = float(args.threshold)
-    #resW, resH = args.resolution.split('x')
+    # resW, resH = args.resolution.split('x')
     imW, imH = int(640), int(480)
     use_TPU = args.edgetpu
 
@@ -61,10 +60,10 @@ try:
     CWD_PATH = os.getcwd()
 
     # Path to .tflite file, which contains the model that is used for object detection
-    PATH_TO_CKPT = os.path.join(CWD_PATH,MODEL_NAME,GRAPH_NAME)
+    PATH_TO_CKPT = os.path.join(CWD_PATH, MODEL_NAME, GRAPH_NAME)
 
     # Path to label map file
-    PATH_TO_LABELS = os.path.join(CWD_PATH,MODEL_NAME,LABELMAP_NAME)
+    PATH_TO_LABELS = os.path.join(CWD_PATH, MODEL_NAME, LABELMAP_NAME)
 
     # Load the label map
     with open(PATH_TO_LABELS, 'r') as f:
@@ -80,7 +79,7 @@ try:
     # If using Edge TPU, use special load_delegate argument
     if use_TPU:
         interpreter = Interpreter(model_path=PATH_TO_CKPT,
-                                experimental_delegates=[load_delegate('libedgetpu.so.1.0')])
+                                  experimental_delegates=[load_delegate('libedgetpu.so.1.0')])
         print(PATH_TO_CKPT)
     else:
         interpreter = Interpreter(model_path=PATH_TO_CKPT)
@@ -113,52 +112,137 @@ try:
 
     # Start streaming
     pipeline.start(config)
+    # Initialize frame rate calculation
+    frame_rate_calc = 1
+    freq = cv2.getTickFrequency()
     ########## end pyrealsense2 ##################
-
+    colors_hash = {}
+    class_to_remove = {1, 2, 3, 4, 5, 6, 7, 8, 9,
+                       10, 11, 12, 13, 14, 15, 16, 17,
+                       18, 19, 20, 21, 22, 23, 24, 25,
+                       26, 27, 28, 29, 30, 31, 32, 33,
+                       34, 35, 36, 37, 38, 40, 41, 42, 43, 44,
+                       46, 47, 48, 49, 50, 51, 52, 53, 54,
+                       55, 74, 75, 76, 77, 78, 79}
     while True:
         # This call waits until a new coherent set of frames is available on a device
         # Calls to get_frame_data(...) and get_frame_timestamp(...) on a device will return stable values until wait_for_frames(...) is called
+        t1 = cv2.getTickCount()
         frames = pipeline.wait_for_frames()
         depth = frames.get_depth_frame()
         color_frame = frames.get_color_frame()
+
+        # Convert images to numpy arrays
         color_image = np.asanyarray(color_frame.get_data())
-        frame_resized = cv2.resize(color_image, (width, height))
-       # print("width = ", width,"height = ", height)
-       # print("imW = ", imW,"imH = ", imH)
-        input_data = np.expand_dims(frame_resized, axis=0)
-        if floating_model:
-            input_data = (np.float32(input_data) - input_mean) / input_std
+        color_image = cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR)
+        scaled_size = (color_frame.width, color_frame.height)
+        scaled_frame = cv2.resize(color_image, (width, height))
+        # expand the image
+        input_data = np.expand_dims(scaled_frame, axis=0)
+
         # Perform the actual detection by running the model with the image as input
-        interpreter.set_tensor(input_details[0]['index'],input_data)
+        interpreter.set_tensor(input_details[0]['index'], input_data)
         interpreter.invoke()
         # Retrieve detection results
-        boxes = interpreter.get_tensor(output_details[0]['index'])[0] # Bounding box coordinates of detected objects
-        classes = interpreter.get_tensor(output_details[1]['index'])[0] # Class index of detected objects
-        scores = interpreter.get_tensor(output_details[2]['index'])[0] # Confidence of detected objects
-        #color =
-        #if not depth:
+        # Bounding box coordinates of detected objects
+        boxes = interpreter.get_tensor(output_details[0]['index'])[0]
+        classes = interpreter.get_tensor(output_details[1]['index'])[
+            0]  # Class index of detected objects
+        scores = interpreter.get_tensor(output_details[2]['index'])[
+            0]  # Confidence of detected objects
+        num = interpreter.get_tensor(output_details[3]['index'])[0]
+
+        boxes = np.squeeze(boxes)
+        classes = np.squeeze(classes).astype(np.int32)
+        scores = np.squeeze(scores)
+
+        # if not depth:
         #    continue
-        #dist = depth.get_distance(int(640/2), int(480/2))
-        #print(dist)
-        for i in range(len(scores)):
-            print(len(scores))
-            if i > 3:
-                break
-            if ((scores[i] > min_conf_threshold) and (scores[i] <= 1.0)):
+        # dist = depth.get_distance(int(640/2), int(480/2))
+        # print(dist)
 
-                # Get bounding box coordinates and draw box
-                # Interpreter can return coordinates that are outside of image dimensions, need to force them to be within image using max() and min()
-                ymin = int(max(1,(boxes[i][0] * imH)))
-                xmin = int(max(1,(boxes[i][1] * imW)))
-                ymax = int(min(imH,(boxes[i][2] * imH)))
-                xmax = int(min(imW,(boxes[i][3] * imW)))
-                center_box_y = int(((ymax - ymin) / 2) + ymin)
-                center_box_x = int(((xmax - xmin) / 2) + xmin)
-                dist = depth.get_distance(center_box_x, center_box_y)
-                print(labels[int(classes[i])], end=" ")
-                print(scores[i], end=" ")
-                print(dist)
+        objects_info = []
+        for i in range(int(num)):
+            class_ = classes[i]
+            score = scores[i]
+            box = boxes[i]
+            if class_ not in colors_hash:
+                colors_hash[class_] = tuple(
+                    np.random.choice(range(256), size=3))
+            # min_conf_threshold:
+            if score > min_conf_threshold and classes[i] not in class_to_remove:
+                left = int(box[1] * color_frame.width)
+                top = int(box[0] * color_frame.height)
+                right = int(box[3] * color_frame.width)
+                bottom = int(box[2] * color_frame.height)
+                xmin = left
+                p1 = (left, top)
+                p2 = (right, bottom)
+                # draw box
+                r, g, b = colors_hash[class_]
+                cv2.rectangle(color_image, p1, p2,
+                              (int(r), int(g), int(b)), 2, 1)
+                # Draw Score Label
+                # Look up object name from "labels" array using class index
+                object_name = labels[int(classes[i])]
+                label = '%s: %d%%' % (object_name, int(
+                    scores[i]*100))  # Example: 'person: 72%'
+                labelSize, baseLine = cv2.getTextSize(
+                    label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)  # Get font size
+                # Make sure not to draw label too close to top of window
+                label_ymin = max(top, labelSize[1] + 10)
+                # Draw white box to put label text in
+                cv2.rectangle(color_image, (xmin, label_ymin-labelSize[1]-10), (
+                    xmin+labelSize[0], label_ymin+baseLine-10), (255, 255, 255), cv2.FILLED)
+                cv2.putText(color_image, label, (xmin, label_ymin-7),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)  # Draw label text
 
+                # Draw Distance Label
+                box_center = (int((left + right)/2), int((top + bottom)/2))
+                # box_center = (int(color_frame.width/2),
+                #              int(color_frame.height/2))
+                # Look up object name from "labels" array using class index
+                object_distance = depth.get_distance(
+                    int((left + right)/2), int((top + bottom)/2))
+
+                # label_dist = 'Distance: %f' % object_distance
+                label_dist = "Distance: {distance}".format(
+                    distance=object_distance)
+                labelSize, baseLine = cv2.getTextSize(
+                    label_dist, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)  # Get font size
+                # Make sure not to draw label too close to top of window
+                label_ymin = max(bottom, labelSize[1] - 10)
+                # Draw white box to put label text in
+                cv2.rectangle(color_image, (xmin, label_ymin-labelSize[1]-10), (
+                    xmin+labelSize[0], label_ymin+baseLine-10), (255, 255, 255), cv2.FILLED)
+                cv2.putText(color_image, label_dist, (xmin, label_ymin-7),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)  # Draw label text
+
+                # Draw Box CenterPoint
+                cv2.circle(color_image, box_center, 7, (255, 255, 255))
+
+                if box_center[0] < color_frame.width*(1/3):
+                    direction = "Left"
+                elif box_center[0] > color_frame.width*(2/3):
+                    direction = "Right"
+                else:
+                    direction = "Center"
+
+                objects_info.append((object_name, object_distance, direction))
+
+        cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
+        cv2.putText(color_image, 'FPS: {0:.2f}'.format(
+            frame_rate_calc), (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2, cv2.LINE_AA)
+        cv2.imshow('RealSense', color_image)
+        t2 = cv2.getTickCount()
+        time1 = (t2-t1)/freq
+        frame_rate_calc = 1/time1
+        cv2.waitKey(1)
+        objects_info.sort(key=lambda tup: tup[1])
+        os.system('clear')
+        print([(object[0] + " is " + str(object[1]) + " meters and " + object[2])
+              for object in objects_info])
+    cv2.destroyAllWindows()
     exit(0)
 
 except Exception as e:
