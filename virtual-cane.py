@@ -6,127 +6,24 @@ import cv2
 import numpy as np
 import sys
 import time
-from threading import Thread
 import importlib.util
 
 
-try:
-    ##########   tflite     ##################
-    # Define and parse input arguments
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--modeldir', help='Folder the .tflite file is located in',
-                        required=True)
-    parser.add_argument('--graph', help='Name of the .tflite file, if different than detect.tflite',
-                        default='detect.tflite')
-    parser.add_argument('--labels', help='Name of the labelmap file, if different than labelmap.txt',
-                        default='labelmap.txt')
-    parser.add_argument('--threshold', help='Minimum confidence threshold for displaying detected objects',
-                        default=0.5)
-    parser.add_argument('--resolution', help='Desired webcam resolution in WxH. If the webcam does not support the resolution entered, errors may occur.',
-                        default='1280x720')
-    parser.add_argument('--edgetpu', help='Use Coral Edge TPU Accelerator to speed up detection',
-                        action='store_true')
+def init_object_detection(class_to_remove):
 
-    args = parser.parse_args()
-
-    MODEL_NAME = args.modeldir
-    GRAPH_NAME = args.graph
-    LABELMAP_NAME = args.labels
-    min_conf_threshold = float(args.threshold)
-    # resW, resH = args.resolution.split('x')
-    imW, imH = int(640), int(480)
-    use_TPU = args.edgetpu
-
-    # Import TensorFlow libraries
-    # If tflite_runtime is installed, import interpreter from tflite_runtime, else import from regular tensorflow
-    # If using Coral Edge TPU, import the load_delegate library
-    pkg = importlib.util.find_spec('tflite_runtime')
-    if pkg:
-        from tflite_runtime.interpreter import Interpreter
-        if use_TPU:
-            from tflite_runtime.interpreter import load_delegate
-    else:
-        from tensorflow.lite.python.interpreter import Interpreter
-        if use_TPU:
-            from tensorflow.lite.python.interpreter import load_delegate
-
-    # If using Edge TPU, assign filename for Edge TPU model
-    if use_TPU:
-        # If user has specified the name of the .tflite file, use that name, otherwise use default 'edgetpu.tflite'
-        if (GRAPH_NAME == 'detect.tflite'):
-            GRAPH_NAME = 'edgetpu.tflite'
-
-    # Get path to current working directory
-    CWD_PATH = os.getcwd()
-
-    # Path to .tflite file, which contains the model that is used for object detection
-    PATH_TO_CKPT = os.path.join(CWD_PATH, MODEL_NAME, GRAPH_NAME)
-
-    # Path to label map file
-    PATH_TO_LABELS = os.path.join(CWD_PATH, MODEL_NAME, LABELMAP_NAME)
-
-    # Load the label map
-    with open(PATH_TO_LABELS, 'r') as f:
-        labels = [line.strip() for line in f.readlines()]
-
-    # Have to do a weird fix for label map if using the COCO "starter model" from
-    # https://www.tensorflow.org/lite/models/object_detection/overview
-    # First label is '???', which has to be removed.
-    if labels[0] == '???':
-        del(labels[0])
-
-    # Load the Tensorflow Lite model.
-    # If using Edge TPU, use special load_delegate argument
-    if use_TPU:
-        interpreter = Interpreter(model_path=PATH_TO_CKPT,
-                                  experimental_delegates=[load_delegate('libedgetpu.so.1.0')])
-        print(PATH_TO_CKPT)
-    else:
-        interpreter = Interpreter(model_path=PATH_TO_CKPT)
-
-    interpreter.allocate_tensors()
-
-    # Get model details
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-    height = input_details[0]['shape'][1]
-    width = input_details[0]['shape'][2]
-
-    floating_model = (input_details[0]['dtype'] == np.float32)
-
-    input_mean = 127.5
-    input_std = 127.5
-
-    # Initialize frame rate calculation
-    frame_rate_calc = 1
-    freq = cv2.getTickFrequency()
-
-    ##########  end tflite  ##################
-    ########## pyrealsense2 ##################
-    # Create a context object. This object owns the handles to all connected realsense devices
-    pipeline = rs.pipeline()
-
-    # Configure streams
-    config = rs.config()
-    config.enable_all_streams()
-
-    # Start streaming
-    pipeline.start(config)
-    # Initialize frame rate calculation
-    frame_rate_calc = 1
-    freq = cv2.getTickFrequency()
     ########## end pyrealsense2 ##################
-    colors_hash = {}
-    class_to_remove = {1, 2, 3, 4, 5, 6, 7, 8, 9,
-                       10, 11, 12, 13, 14, 15, 16, 17,
-                       18, 19, 20, 21, 22, 23, 24, 25,
-                       26, 27, 28, 29, 30, 31, 32, 33,
-                       34, 35, 36, 37, 38, 40, 41, 42, 43, 44,
-                       46, 47, 48, 49, 50, 51, 52, 53, 54,
-                       55, 74, 75, 76, 77, 78, 79}
-    while True:
-        # This call waits until a new coherent set of frames is available on a device
-        # Calls to get_frame_data(...) and get_frame_timestamp(...) on a device will return stable values until wait_for_frames(...) is called
+    return pipeline, interpreter, input_details, output_details, freq, frame_rate_calc, colors_hash, width, height, min_conf_threshold
+
+
+def espeak(texttospeak):
+    s = '"{input_string}"'.format(input_string=texttospeak)
+    os.system('espeak -s 150 ' + s + ' --stdout > audio.wav')
+
+
+def detect_objects(class_to_remove, pipeline, interpreter, input_details, output_details, freq, frame_rate_calc, colors_hash, width, height, min_conf_threshold, labels):
+    # This call waits until a new coherent set of frames is available on a device
+    # Calls to get_frame_data(...) and get_frame_timestamp(...) on a device will return stable values until wait_for_frames(...) is called
+    for num_frames in range(int(5)):
         t1 = cv2.getTickCount()
         frames = pipeline.wait_for_frames()
         depth = frames.get_depth_frame()
@@ -136,7 +33,8 @@ try:
         color_image = np.asanyarray(color_frame.get_data())
         color_image = cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR)
         scaled_size = (color_frame.width, color_frame.height)
-        scaled_frame = cv2.resize(color_image, (width, height))
+        scaled_frame = cv2.resize(
+            color_image, (width, height))
         # expand the image
         input_data = np.expand_dims(scaled_frame, axis=0)
 
@@ -155,6 +53,8 @@ try:
         boxes = np.squeeze(boxes)
         classes = np.squeeze(classes).astype(np.int32)
         scores = np.squeeze(scores)
+        # for index, label_name in enumerate(labels):
+        #    print(label_name, index)
 
         # if not depth:
         #    continue
@@ -162,6 +62,7 @@ try:
         # print(dist)
 
         objects_info = []
+
         for i in range(int(num)):
             class_ = classes[i]
             score = scores[i]
@@ -206,8 +107,8 @@ try:
                     int((left + right)/2), int((top + bottom)/2))
 
                 # label_dist = 'Distance: %f' % object_distance
-                label_dist = "Distance: {distance}".format(
-                    distance=object_distance)
+                label_dist = "Distance: {distance}m".format(
+                    distance=round(object_distance, 3))
                 labelSize, baseLine = cv2.getTextSize(
                     label_dist, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)  # Get font size
                 # Make sure not to draw label too close to top of window
@@ -239,12 +140,120 @@ try:
         frame_rate_calc = 1/time1
         cv2.waitKey(1)
         objects_info.sort(key=lambda tup: tup[1])
-        os.system('clear')
-        print([(object[0] + " is " + str(object[1]) + " meters and " + object[2])
-              for object in objects_info])
-    cv2.destroyAllWindows()
-    exit(0)
+        # os.system('clear')
+        print([(object[0] + " is " + str(round(object[1], 1)) + " meters and " + object[2])
+               for object in objects_info])
+    return objects_info
 
-except Exception as e:
-    print(e)
+
+def main():
+    ##########   tflite     ##################
+    # Define and parse input arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--modeldir', help='Folder the .tflite file is located in',
+                        required=True)
+    parser.add_argument('--graph', help='Name of the .tflite file, if different than detect.tflite',
+                        default='detect.tflite')
+    parser.add_argument('--labels', help='Name of the labelmap file, if different than labelmap.txt',
+                        default='labelmap.txt')
+    parser.add_argument('--threshold', help='Minimum confidence threshold for displaying detected objects',
+                        default=0.5)
+    parser.add_argument('--resolution', help='Desired webcam resolution in WxH. If the webcam does not support the resolution entered, errors may occur.',
+                        default='1280x720')
+
+    args = parser.parse_args()
+
+    MODEL_NAME = args.modeldir
+    GRAPH_NAME = args.graph
+    LABELMAP_NAME = args.labels
+    min_conf_threshold = float(args.threshold)
+    # resW, resH = args.resolution.split('x')
+    imW, imH = int(640), int(480)
+
+    # Import TensorFlow libraries
+    # If tflite_runtime is installed, import interpreter from tflite_runtime, else import from regular tensorflow
+    # If using Coral Edge TPU, import the load_delegate library
+    pkg = importlib.util.find_spec('tflite_runtime')
+    if pkg:
+        from tflite_runtime.interpreter import Interpreter
+    else:
+        from tensorflow.lite.python.interpreter import Interpreter
+
+    # Get path to current working directory
+    CWD_PATH = os.getcwd()
+
+    # Path to .tflite file, which contains the model that is used for object detection
+    PATH_TO_CKPT = os.path.join(CWD_PATH, MODEL_NAME, GRAPH_NAME)
+
+    # Path to label map file
+    PATH_TO_LABELS = os.path.join(CWD_PATH, MODEL_NAME, LABELMAP_NAME)
+
+    # Load the label map
+    with open(PATH_TO_LABELS, 'r') as f:
+        labels = [line.strip() for line in f.readlines()]
+
+    # Have to do a weird fix for label map if using the COCO "starter model" from
+    # https://www.tensorflow.org/lite/models/object_detection/overview
+    # First label is '???', which has to be removed.
+    if labels[0] == '???':
+        del(labels[0])
+
+    # Load the Tensorflow Lite model.
+    # If using Edge TPU, use special load_delegate argument
+
+    interpreter = Interpreter(model_path=PATH_TO_CKPT)
+
+    interpreter.allocate_tensors()
+
+    # Get model details
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    height = input_details[0]['shape'][1]
+    width = input_details[0]['shape'][2]
+
+    floating_model = (input_details[0]['dtype'] == np.float32)
+
+    input_mean = 127.5
+    input_std = 127.5
+
+    # Initialize frame rate calculation
+    frame_rate_calc = 1
+    freq = cv2.getTickFrequency()
+
+    ##########  end tflite  ##################
+    ########## pyrealsense2 ##################
+    # Create a context object. This object owns the handles to all connected realsense devices
+    pipeline = rs.pipeline()
+
+    # Configure streams
+    config = rs.config()
+    config.enable_stream(rs.stream.color, imW, imH)
+    config.enable_stream(rs.stream.depth, imW, imH)
+    # Start streaming
+    pipeline.start(config)
+    colors_hash = {}
+    class_to_remove = {1,  2,  3,  4,  5,  6,  7,  8,
+                       9, 10, 11, 12, 13, 14, 15, 16, 17,
+                       18, 19, 20, 21, 22, 23, 24, 25,
+                       26, 27, 28, 29, 30, 31, 32, 33, 34,
+                       35, 36, 37, 38, 40, 41, 42, 43, 44,
+                       46, 47, 48, 49, 50, 51, 52, 53, 54,
+                       55, 56, 57, 58, 59, 61, 74, 75, 76,
+                       77, 78, 79}
+    try:
+
+        objects_info = detect_objects(class_to_remove, pipeline, interpreter, input_details,
+                                      output_details, freq, frame_rate_calc, colors_hash, width, height, min_conf_threshold, labels)
+        espeak([(object[0] + " is " + str(round(object[1], 1)) + " meters and " + object[2])
+               for object in objects_info])
+        cv2.destroyAllWindows()
+
+        exit(0)
+
+    except Exception as e:
+        print(e)
     pass
+
+
+if __name__ == "__main__":
+    main()

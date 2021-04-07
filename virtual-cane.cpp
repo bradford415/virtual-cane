@@ -15,27 +15,27 @@
 #include <signal.h>
 
 #include <gpiod.h>
-
+#include "tensorflow/tensorflow/lite/interpreter.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //                                     These parameters are reconfigurable                                        //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#define STREAM          RS2_STREAM_DEPTH  // rs2_stream is a types of data provided by RealSense device           //
-#define FORMAT          RS2_FORMAT_Z16    // rs2_format identifies how binary data is encoded within a frame      //
-#define WIDTH           640               // Defines the number of columns for each frame or zero for auto resolve//
-#define HEIGHT          0                 // Defines the number of lines for each frame or zero for auto resolve  //
-#define FPS             30                // Defines the rate of frames per second                                //
-#define STREAM_INDEX    0                 // Defines the stream index, used for multiple streams of the same type //
+#define STREAM RS2_STREAM_DEPTH // rs2_stream is a types of data provided by RealSense device           //
+#define FORMAT RS2_FORMAT_Z16	// rs2_format identifies how binary data is encoded within a frame      //
+#define WIDTH 640				// Defines the number of columns for each frame or zero for auto resolve//
+#define HEIGHT 0				// Defines the number of lines for each frame or zero for auto resolve  //
+#define FPS 30					// Defines the rate of frames per second                                //
+#define STREAM_INDEX 0			// Defines the stream index, used for multiple streams of the same type //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 #ifndef CONSUMER
-#define CONSUMER	"Consumer"
+#define CONSUMER "Consumer"
 #endif
 
 void checkGpioError(int ret, struct gpiod_chip **chip, struct gpiod_line **line);
 
 char *chipname = "gpiochip0";
-unsigned int pin1 = 14,pin2 = 15, pin3 = 18;
+unsigned int pin1 = 14, pin2 = 15, pin3 = 18;
 struct gpiod_chip *chip;
 struct gpiod_line *line1, *line2, *line3;
 
@@ -44,25 +44,57 @@ void intHandler(int signum)
 	int ret;
 	printf("Caught signal %d, exiting...\n", signum);
 
-	ret = gpiod_line_set_value(line1, 0);
-	checkGpioError(ret, &chip, &line1);
-	ret = gpiod_line_set_value(line2, 0);
-	checkGpioError(ret, &chip, &line2);
-	ret = gpiod_line_set_value(line3, 0);
-	checkGpioError(ret, &chip, &line3);
-	
-	exit(0);
-	return; 
+	if (line1 != NULL)
+	{
+		ret = gpiod_line_set_value(line1, 0);
+		checkGpioError(ret, &chip, &line1);
+	}
+	if (line2 != NULL)
+	{
+		ret = gpiod_line_set_value(line2, 0);
+		checkGpioError(ret, &chip, &line2);
+	}
+	if (line3 != NULL)
+	{
+		ret = gpiod_line_set_value(line3, 0);
+		checkGpioError(ret, &chip, &line3);
+	}
 
+	exit(0);
+	return;
+}
+
+void check_error(rs2_error *e)
+{
+	if (e)
+	{
+		printf("rs_error was raised when calling %s(%s):\n", rs2_get_failed_function(e), rs2_get_failed_args(e));
+		printf("    %s\n", rs2_get_error_message(e));
+		intHandler(EXIT_FAILURE);
+		exit(EXIT_FAILURE);
+	}
+}
+
+void print_device_info(rs2_device *dev)
+{
+	rs2_error *e = 0;
+	printf("\nUsing device 0, an %s\n", rs2_get_device_info(dev, RS2_CAMERA_INFO_NAME, &e));
+	check_error(e);
+	printf("    Serial number: %s\n", rs2_get_device_info(dev, RS2_CAMERA_INFO_SERIAL_NUMBER, &e));
+	check_error(e);
+	printf("    Firmware version: %s\n\n", rs2_get_device_info(dev, RS2_CAMERA_INFO_FIRMWARE_VERSION, &e));
+	check_error(e);
 }
 
 void checkGpioError(int ret, struct gpiod_chip **chip, struct gpiod_line **line)
 {
-	if (ret < 0) 
+	if (ret < 0)
 	{
 		perror("Failed to output value\n");
-		gpiod_line_release(*line);
-		gpiod_chip_close(*chip);
+		if (*line != NULL)
+			gpiod_line_release(*line);
+		if (*chip != NULL)
+			gpiod_chip_close(*chip);
 		exit(0);
 	}
 
@@ -75,28 +107,28 @@ void init_gpio(struct gpiod_chip **chip, struct gpiod_line **line1, struct gpiod
 	printf("Setting up chip %s...\n", chipname);
 
 	*chip = gpiod_chip_open_by_name(chipname);
-	if (!(*chip)) 
+	if (!(*chip))
 	{
 		perror("Failed to open chip\n");
 		exit(0);
 	}
 
 	*line1 = gpiod_chip_get_line(*chip, pin_num1);
-	if(!(*line1))
+	if (!(*line1))
 	{
 		perror("Failed to get line\n");
 		gpiod_chip_close(*chip);
 		exit(0);
 	}
 	*line2 = gpiod_chip_get_line(*chip, pin_num2);
-	if(!(*line2))
+	if (!(*line2))
 	{
 		perror("Failed to get line\n");
 		gpiod_chip_close(*chip);
 		exit(0);
 	}
 	*line3 = gpiod_chip_get_line(*chip, pin_num3);
-	if(!(*line3))
+	if (!(*line3))
 	{
 		perror("Failed to get line\n");
 		gpiod_chip_close(*chip);
@@ -109,7 +141,6 @@ void init_gpio(struct gpiod_chip **chip, struct gpiod_line **line1, struct gpiod
 	checkGpioError(ret, chip, line2);
 	ret = gpiod_line_request_output(*line3, CONSUMER, 0);
 	checkGpioError(ret, chip, line3);
-
 
 	ret = gpiod_line_set_value(*line1, 0);
 	checkGpioError(ret, chip, line1);
@@ -183,7 +214,7 @@ void set_motors(struct gpiod_chip **chip, struct gpiod_line **pin1, struct gpiod
 int main()
 {
 	signal(SIGINT, intHandler);
-/*
+	/*
 	char *chipname = "gpiochip0";
 	unsigned int pin1 = 14,pin2 = 15, pin3 = 18;
 	struct gpiod_chip *chip;
@@ -191,41 +222,45 @@ int main()
 	*/
 
 	// initialize gpio files
-	init_gpio(&chip, &line1, &line2, &line3, chipname, pin1, pin2, pin3);
 
-	rs2_error* e = 0;
+	rs2_error *e = 0;
 
 	// Create a context object. This object owns the handles to all connected realsense devices.
 	// The returned object should be released with rs2_delete_context(...)
-	rs2_context* ctx = rs2_create_context(RS2_API_VERSION, &e);
+	rs2_context *ctx = rs2_create_context(RS2_API_VERSION, &e);
 	check_error(e);
 
 	/* Get a list of all the connected devices. */
 	// The returned object should be released with rs2_delete_device_list(...)
-	rs2_device_list* device_list = rs2_query_devices(ctx, &e);
+	rs2_device_list *device_list = rs2_query_devices(ctx, &e);
 	check_error(e);
 
 	int dev_count = rs2_get_device_count(device_list, &e);
 	check_error(e);
 	printf("There are %d connected RealSense devices.\n", dev_count);
 	if (0 == dev_count)
+	{
+		intHandler(EXIT_FAILURE);
 		return EXIT_FAILURE;
+	}
+
+	init_gpio(&chip, &line1, &line2, &line3, chipname, pin1, pin2, pin3);
 
 	// Get the first connected device
 	// The returned object should be released with rs2_delete_device(...)
-	rs2_device* dev = rs2_create_device(device_list, 0, &e);
+	rs2_device *dev = rs2_create_device(device_list, 0, &e);
 	check_error(e);
 
 	print_device_info(dev);
 
 	// Create a pipeline to configure, start and stop camera streaming
 	// The returned object should be released with rs2_delete_pipeline(...)
-	rs2_pipeline* pipeline =  rs2_create_pipeline(ctx, &e);
+	rs2_pipeline *pipeline = rs2_create_pipeline(ctx, &e);
 	check_error(e);
 
 	// Create a config instance, used to specify hardware configuration
 	// The retunred object should be released with rs2_delete_config(...)
-	rs2_config* config = rs2_create_config(&e);
+	rs2_config *config = rs2_create_config(&e);
 	check_error(e);
 
 	// Request a specific configuration
@@ -234,10 +269,11 @@ int main()
 
 	// Start the pipeline streaming
 	// The retunred object should be released with rs2_delete_pipeline_profile(...)
-	rs2_pipeline_profile* pipeline_profile = rs2_pipeline_start_with_config(pipeline, config, &e);
+	rs2_pipeline_profile *pipeline_profile = rs2_pipeline_start_with_config(pipeline, config, &e);
 	if (e)
 	{
 		printf("The connected device doesn't support depth streaming!\n");
+		intHandler(EXIT_FAILURE);
 		exit(EXIT_FAILURE);
 	}
 
@@ -246,7 +282,7 @@ int main()
 		// This call waits until a new composite_frame is available
 		// composite_frame holds a set of frames. It is used to prevent frame drops
 		// The returned object should be released with rs2_release_frame(...)
-		rs2_frame* frames = rs2_pipeline_wait_for_frames(pipeline, RS2_DEFAULT_TIMEOUT, &e);
+		rs2_frame *frames = rs2_pipeline_wait_for_frames(pipeline, RS2_DEFAULT_TIMEOUT, &e);
 		check_error(e);
 
 		// Returns the number of frames embedded within the composite frame
@@ -258,30 +294,31 @@ int main()
 		for (i = 0; i < num_of_frames; ++i)
 		{
 			// The retunred object should be released with rs2_release_frame(...)
-			rs2_frame* frame = rs2_extract_frame(frames, i, &e);
+			rs2_frame *frame = rs2_extract_frame(frames, i, &e);
 			check_error(e);
 
 			// Check if the given frame can be extended to depth frame interface
 			// Accept only depth frames and skip other frames
 			if (0 == rs2_is_frame_extendable_to(frame, RS2_EXTENSION_DEPTH_FRAME, &e))
-				continue;
+			{
 
-			// Get the depth frame's dimensions
-			int width = rs2_get_frame_width(frame, &e);
-			check_error(e);
-			int height = rs2_get_frame_height(frame, &e);
-			check_error(e);
+				// Get the depth frame's dimensions
+				int width = rs2_get_frame_width(frame, &e);
+				check_error(e);
+				int height = rs2_get_frame_height(frame, &e);
+				check_error(e);
 
-			// Query the distance from the camera to the object in the center of the image
-			float dist_to_center = rs2_depth_frame_get_distance(frame, width / 2, height / 2, &e);
-			check_error(e);
+				// Query the distance from the camera to the object in the center of the image
+				float dist_to_center = rs2_depth_frame_get_distance(frame, width / 2, height / 2, &e);
+				check_error(e);
 
-			// Print the distance
-			printf("The camera is facing an object %.3f meters away.\n", dist_to_center);
+				// Print the distance
+				printf("The camera is facing an object %.3f meters away.\n", dist_to_center);
 
-			set_motors(&chip, &line1, &line2, &line3, dist_to_center);
+				set_motors(&chip, &line1, &line2, &line3, dist_to_center);
 
-			rs2_release_frame(frame);
+				rs2_release_frame(frame);
+			}
 		}
 
 		rs2_release_frame(frames);

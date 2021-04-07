@@ -9,11 +9,13 @@ project(RealsenseExamples-Distance)
 set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 
 
-add_executable(virtual-cane virtual-cane.c example.h)
-target_link_libraries(virtual-cane /home/pi/librealsense/build/librealsense2.so -lgpiod)
-set_target_properties (virtual-cane PROPERTIES
+#add_executable(virtual-cane-hello virtual-helloworld.cpp motor_interface.hpp tensorflow/tensorflow/lite/interpreter.h tensorflow/tensorflow/lite/model_builder.h tensorflow/tensorflow/lite/interpreter_builder.h tensorflow/tensorflow/lite/op_resolver.h tensorflow/tensorflow/lite/error_reporter.h)
+add_executable(virtual-cane-hello virtual-helloworld.cpp motor_interface.hpp)
+target_link_libraries(virtual-cane-hello /home/pi/librealsense/build/librealsense2.so -lopencv_core -lgpiod /usr/local/lib/libtensorflow-lite.a /usr/local/lib/libflatbuffers.a)
+target_include_directories(virtual-cane-hello PRIVATE /home/pi/tensorflow)
+set_target_properties (virtual-cane-hello PROPERTIES
 FOLDER "Examples/C"
 )
 
-install(TARGETS virtual-cane RUNTIME DESTINATION ./build)
+install(TARGETS virtual-cane-hello RUNTIME DESTINATION ./build)
 
