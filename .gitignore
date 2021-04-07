@@ -11,3 +11,17 @@ CTestTestfile.cmake
 _deps
 
 virtual-cane
+tensorflow
+.github
+venv
+build
+tflite1-env
+.clang-format
+*.wav
+*.so
+inference.cpp
+librealsense_tensorflow.py
+motor_interface.hpp
+python-tutorial-1-depth.py
+virtual-cane-hello
+.vscode
