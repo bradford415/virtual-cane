@@ -17,6 +17,8 @@ def espeak(texttospeak):
 def detect_objects(class_to_remove, pipeline, interpreter, input_details, output_details, freq, frame_rate_calc, colors_hash, width, height, min_conf_threshold, labels):
     # This call waits until a new coherent set of frames is available on a device
     # Calls to get_frame_data(...) and get_frame_timestamp(...) on a device will return stable values until wait_for_frames(...) is called
+    
+    objects_all = []
     for num_frames in range(int(5)):
         t1 = cv2.getTickCount()
         frames = pipeline.wait_for_frames()
@@ -56,7 +58,6 @@ def detect_objects(class_to_remove, pipeline, interpreter, input_details, output
         # print(dist)
 
         objects_info = []
-
         for i in range(int(num)):
             class_ = classes[i]
             score = scores[i]
@@ -66,6 +67,18 @@ def detect_objects(class_to_remove, pipeline, interpreter, input_details, output
                     np.random.choice(range(256), size=3))
             # min_conf_threshold:
             if score > min_conf_threshold and classes[i] not in class_to_remove:
+                object_name = labels[int(classes[i])]
+               
+                # Skip objects already detected
+                skip = 0
+                for thing in objects_info:
+                    if object_name == thing[0]:
+                        skip = 1
+
+                if skip:
+                    continue
+
+
                 left = int(box[1] * color_frame.width)
                 top = int(box[0] * color_frame.height)
                 right = int(box[3] * color_frame.width)
@@ -79,7 +92,7 @@ def detect_objects(class_to_remove, pipeline, interpreter, input_details, output
                               (int(r), int(g), int(b)), 2, 1)
                 # Draw Score Label
                 # Look up object name from "labels" array using class index
-                object_name = labels[int(classes[i])]
+                #object_name = labels[int(classes[i])]
                 label = '%s: %d%%' % (object_name, int(
                     scores[i]*100))  # Example: 'person: 72%'
                 labelSize, baseLine = cv2.getTextSize(
@@ -124,20 +137,23 @@ def detect_objects(class_to_remove, pipeline, interpreter, input_details, output
                     direction = "Center"
 
                 objects_info.append((object_name, object_distance, direction))
-
+        
+        objects_info.sort(key=lambda tup: tup[1])
         cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
         cv2.putText(color_image, 'FPS: {0:.2f}'.format(
-            frame_rate_calc), (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2, cv2.LINE_AA)
+        frame_rate_calc), (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2, cv2.LINE_AA)
         cv2.imshow('RealSense', color_image)
         t2 = cv2.getTickCount()
         time1 = (t2-t1)/freq
         frame_rate_calc = 1/time1
+
+        objects_all.append(objects_info)
+
         cv2.waitKey(1)
-        objects_info.sort(key=lambda tup: tup[1])
-        # os.system('clear')
+               # os.system('clear')
         print([(object[0] + " is " + str(round(object[1], 1)) + " meters and " + object[2])
                for object in objects_info])
-    return objects_info
+    return objects_all
 
 
 def main():
@@ -319,8 +335,20 @@ def main():
     }
     try:
 
-        objects_info = detect_objects(class_to_remove, pipeline, interpreter, input_details,
+        objects_all = detect_objects(class_to_remove, pipeline, interpreter, input_details,
                                       output_details, freq, frame_rate_calc, colors_hash, width, height, min_conf_threshold, labels)
+        
+        # Filter outliers and unnecessary objects
+        for frame in objects_all:
+        # TODO
+        # 1) Remove zero distance objects
+        # 2) Consider increasing number of frames per inference
+        # 3) 
+
+        print("\n")
+        print(objects_all)
+
+
         espeak([(object[0] + " is " + str(round(object[1], 1)) + " meters and " + object[2])
                for object in objects_info])
         cv2.destroyAllWindows()
