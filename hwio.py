@@ -2,7 +2,7 @@ import time
 import random
 from gpiozero import LED, Button
 
-def get_distance(iteration):
+def get_distance():
 	return random.random() * 5.0
 	
 
@@ -55,7 +55,7 @@ button = Button(24,pull_up=False)
 while (True):
 
     # TO BE REPLACED BY: get realsense distance
-    dist = get_distance(i)
+    dist = get_distance()
 
     # turn on motors based on distance
     turn_on(dist,led1,led2,led3)
