@@ -7,6 +7,108 @@ import numpy as np
 import sys
 import time
 import importlib.util
+import time
+import random
+from gpiozero import LED, Button
+
+
+def get_distance():
+    return random.random() * 5.0
+
+
+def turn_on(distance, l1, l2, l3):
+    if (distance < 3 and distance > 2):
+        print("1 0 0 , Dist = ", distance)  # one motors on
+        l1.on()
+        l2.off()
+        l3.off()
+    elif (distance < 2 and distance > 1):
+        print("1 1 0 , Dist = ", distance)  # two motors on
+        l1.on()
+        l2.on()
+        l3.off()
+    elif (distance > 0 and distance < 1):
+        print("1 1 1 , Dist = ", distance)  # all motors on
+        l1.on()
+        l2.on()
+        l3.on()
+    else:
+        print("0 0 0 , Dist = ", distance)  # no motors on
+        l1.off()
+        l2.off()
+        l3.off()
+
+
+def run_inference(class_to_remove, pipeline, interpreter, input_details, output_details, freq, frame_rate_calc, colors_hash,
+                  width, height, min_conf_threshold, labels):
+
+    # PUT INFERENCE CODE HERE
+    objects_all = detect_objects(class_to_remove, pipeline, interpreter, input_details,
+                                 output_details, freq, frame_rate_calc, colors_hash, width, height, min_conf_threshold, labels)
+
+    # print(objects_all)
+
+    print("Dection Beginning")
+    # Create dictionary and sort by number of occurences
+    objects_found = {}
+    for frame in objects_all:
+        for thing in frame:
+            objects_found[thing[0]] = 0
+    for frame in objects_all:
+        for thing in frame:
+            current_value = objects_found[thing[0]] + 1
+            objects_found[thing[0]] = current_value
+    sorted_objects = {k: v for k, v in sorted(
+        objects_found.items(), key=lambda item: item[1], reverse=True)}
+
+    # Object must appear 3 times in 5 frames or else it is removed
+    final_objects = {key: val for key,
+                     val in sorted_objects.items() if val >= 3}
+
+    num_objects = len(final_objects)
+
+    # If there is not enough confidence in the objects
+    if num_objects < 1:
+        print("No objects found, try again")
+        espeak("No objects found, try again.")
+        return
+
+    # Flatten 2d to 1d
+    objects_all_1d = [j for sub in objects_all for j in sub]
+
+    # Create list of objects to speak to the user
+    # Each element of the list is a tuple -> (name, distance, center)
+    object_counter = 0
+    objects_speak = []
+    for thing in objects_all_1d:
+        if thing[0] in objects_found and thing[0] not in [object_name[0] for object_name in objects_speak]:
+            object_counter = object_counter + 1
+            objects_speak.append(thing)
+        if object_counter == num_objects:
+            break
+
+    print(sorted_objects)
+    print(final_objects)
+    print(objects_speak)
+
+    print(" ")
+
+    # espeak([(object[0] + " is " + str(round(object[1], 1)) + " meters and " + object[2])
+    #        for object in objects_info])
+
+    # led.toggle()
+    #print("Look at that TV")
+
+    # END INFERENCE CODE
+
+
+def inference_wrapper(class_to_remove, pipeline, interpreter, input_details, output_details, freq, frame_rate_calc, colors_hash,
+                      width, height, min_conf_threshold, labels):
+
+    # WRAPPER NEEDED FOR BUTTON PRESSES
+
+    return lambda: run_inference(class_to_remove, pipeline, interpreter, input_details, output_details, freq, frame_rate_calc, colors_hash,
+                                 width, height, min_conf_threshold, labels)
 
 
 def espeak(texttospeak):
@@ -17,7 +119,7 @@ def espeak(texttospeak):
 def detect_objects(class_to_remove, pipeline, interpreter, input_details, output_details, freq, frame_rate_calc, colors_hash, width, height, min_conf_threshold, labels):
     # This call waits until a new coherent set of frames is available on a device
     # Calls to get_frame_data(...) and get_frame_timestamp(...) on a device will return stable values until wait_for_frames(...) is called
-    
+
     objects_all = []
     for num_frames in range(int(5)):
         t1 = cv2.getTickCount()
@@ -68,8 +170,8 @@ def detect_objects(class_to_remove, pipeline, interpreter, input_details, output
             # min_conf_threshold:
             if score > min_conf_threshold and classes[i] not in class_to_remove:
                 object_name = labels[int(classes[i])]
-               
-                # Skip objects already detected
+
+                # Skip objects already detected or the distance is 0
                 skip = 0
                 for thing in objects_info:
                     if object_name == thing[0]:
@@ -77,7 +179,6 @@ def detect_objects(class_to_remove, pipeline, interpreter, input_details, output
 
                 if skip:
                     continue
-
 
                 left = int(box[1] * color_frame.width)
                 top = int(box[0] * color_frame.height)
@@ -93,6 +194,7 @@ def detect_objects(class_to_remove, pipeline, interpreter, input_details, output
                 # Draw Score Label
                 # Look up object name from "labels" array using class index
                 #object_name = labels[int(classes[i])]
+
                 label = '%s: %d%%' % (object_name, int(
                     scores[i]*100))  # Example: 'person: 72%'
                 labelSize, baseLine = cv2.getTextSize(
@@ -100,10 +202,10 @@ def detect_objects(class_to_remove, pipeline, interpreter, input_details, output
                 # Make sure not to draw label too close to top of window
                 label_ymin = max(top, labelSize[1] + 10)
                 # Draw white box to put label text in
-                cv2.rectangle(color_image, (xmin, label_ymin-labelSize[1]-10), (
-                    xmin+labelSize[0], label_ymin+baseLine-10), (255, 255, 255), cv2.FILLED)
-                cv2.putText(color_image, label, (xmin, label_ymin-7),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)  # Draw label text
+                # cv2.rectangle(color_image, (xmin, label_ymin-labelSize[1]-10), (
+                #    xmin+labelSize[0], label_ymin+baseLine-10), (255, 255, 255), cv2.FILLED)
+                # cv2.putText(color_image, label, (xmin, label_ymin-7),
+                #            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)  # Draw label text
 
                 # Draw Distance Label
                 box_center = (int((left + right)/2), int((top + bottom)/2))
@@ -113,6 +215,10 @@ def detect_objects(class_to_remove, pipeline, interpreter, input_details, output
                 object_distance = depth.get_distance(
                     int((left + right)/2), int((top + bottom)/2))
 
+                # Skip if distance is 0
+                if object_distance < 0.0001:
+                    continue
+                '''
                 # label_dist = 'Distance: %f' % object_distance
                 label_dist = "Distance: {distance}m".format(
                     distance=round(object_distance, 3))
@@ -125,7 +231,7 @@ def detect_objects(class_to_remove, pipeline, interpreter, input_details, output
                     xmin+labelSize[0], label_ymin+baseLine-10), (255, 255, 255), cv2.FILLED)
                 cv2.putText(color_image, label_dist, (xmin, label_ymin-7),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)  # Draw label text
-
+                '''
                 # Draw Box CenterPoint
                 cv2.circle(color_image, box_center, 7, (255, 255, 255))
 
@@ -137,22 +243,26 @@ def detect_objects(class_to_remove, pipeline, interpreter, input_details, output
                     direction = "Center"
 
                 objects_info.append((object_name, object_distance, direction))
-        
+
         objects_info.sort(key=lambda tup: tup[1])
+        '''
         cv2.namedWindow('RealSense', cv2.WINDOW_AUTOSIZE)
         cv2.putText(color_image, 'FPS: {0:.2f}'.format(
-        frame_rate_calc), (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2, cv2.LINE_AA)
+            frame_rate_calc), (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2, cv2.LINE_AA)
         cv2.imshow('RealSense', color_image)
         t2 = cv2.getTickCount()
         time1 = (t2-t1)/freq
         frame_rate_calc = 1/time1
-
+        '''
         objects_all.append(objects_info)
 
-        cv2.waitKey(1)
-               # os.system('clear')
+        # cv2.waitKey(1)
+        # os.system('clear')
         print([(object[0] + " is " + str(round(object[1], 1)) + " meters and " + object[2])
                for object in objects_info])
+
+    cv2.destroyAllWindows()
+
     return objects_all
 
 
@@ -333,28 +443,22 @@ def main():
         88,  # hair drier
         89  # toothbrush
     }
+
+    # Enable PI I/O
+    led1 = LED(14)
+    led2 = LED(15)
+    led3 = LED(18)
+    bled = LED(23)
+    button = Button(24)
+    # END SETTING UP HW I/O
+    button.when_pressed = inference_wrapper(class_to_remove, pipeline, interpreter, input_details,
+                                            output_details, freq, frame_rate_calc, colors_hash,
+                                            width, height, min_conf_threshold, labels)
     try:
 
-        objects_all = detect_objects(class_to_remove, pipeline, interpreter, input_details,
-                                      output_details, freq, frame_rate_calc, colors_hash, width, height, min_conf_threshold, labels)
-        
-        # Filter outliers and unnecessary objects
-        for frame in objects_all:
-        # TODO
-        # 1) Remove zero distance objects
-        # 2) Consider increasing number of frames per inference
-        # 3) 
-
-        print("\n")
-        print(objects_all)
-
-
-        espeak([(object[0] + " is " + str(round(object[1], 1)) + " meters and " + object[2])
-               for object in objects_info])
-        cv2.destroyAllWindows()
-
-        exit(0)
-
+        while True:
+            #print("Waiting for input...")
+            pass
     except Exception as e:
         print(e)
     pass
