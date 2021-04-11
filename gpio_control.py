@@ -1,11 +1,17 @@
-from gpiozero import Button
+from gpiozero import LED
 from time import sleep
 
-button = Button(21)
 
-while True:
-    if button.is_pressed:
-        print("Pressed")
-    else:
-        print("Released")
-    sleep(1)
+motor1 = LED(14)
+motor2 = LED(15)
+motor3 = LED(18)
+
+motor1.off()
+motor2.off()
+motor3.off()
+
+sleep(1)
+
+motor1.on()
+sleep(1)
+motor1.off()
