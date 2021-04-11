@@ -9,7 +9,27 @@ import time
 import importlib.util
 import time
 import random
+import pyttsx3
+from gtts import gTTS
 from gpiozero import LED, Button
+
+
+# Enable PI I/O
+motor1 = LED(14)
+motor2 = LED(15)
+motor3 = LED(18)
+#bled = LED(23)
+button = Button(25)
+# END SETTING UP HW I/O
+
+def gtts_speak(text_to_read):
+    
+    language = 'en'
+    slow_audio_speed = False
+    file_name = "my_file.wav"
+    audio = gTTS(text=text_to_read, lang=language, slow=slow_audio_speed)
+    audio.save(file_name)
+    os.system('omxplayer --no-keys my_file.wav')
 
 
 def get_distance():
@@ -18,22 +38,26 @@ def get_distance():
 
 def turn_on(distance, l1, l2, l3):
     if (distance < 3 and distance > 2):
-        print("1 0 0 , Dist = ", distance)  # one motors on
+        #print("1 0 0 , Dist = ", distance)  # one motors on
+        #print("1 motor on " + str(distance))    
         l1.on()
         l2.off()
         l3.off()
     elif (distance < 2 and distance > 1):
-        print("1 1 0 , Dist = ", distance)  # two motors on
+        #print("1 1 0 , Dist = ", distance)  # two motors on
+        #print("2 motors on " + str(distance))
         l1.on()
         l2.on()
         l3.off()
     elif (distance > 0 and distance < 1):
-        print("1 1 1 , Dist = ", distance)  # all motors on
+        #print("1 1 1 , Dist = ", distance)  # all motors on
+        #print("3 motors on " + str(distance))
         l1.on()
         l2.on()
         l3.on()
     else:
-        print("0 0 0 , Dist = ", distance)  # no motors on
+        #print("0 0 0 , Dist = ", distance)  # no motors on
+        #print(str(distance))
         l1.off()
         l2.off()
         l3.off()
@@ -48,7 +72,7 @@ def run_inference(class_to_remove, pipeline, interpreter, input_details, output_
 
     # print(objects_all)
 
-    print("Dection Beginning")
+    print("\nFiltering objects")
     # Create dictionary and sort by number of occurences
     objects_found = {}
     for frame in objects_all:
@@ -70,7 +94,7 @@ def run_inference(class_to_remove, pipeline, interpreter, input_details, output_
     # If there is not enough confidence in the objects
     if num_objects < 1:
         print("No objects found, try again")
-        espeak("No objects found, try again.")
+        gtts_speak("No objects found, try again.")
         return
 
     # Flatten 2d to 1d
@@ -93,8 +117,17 @@ def run_inference(class_to_remove, pipeline, interpreter, input_details, output_
 
     print(" ")
 
-    # espeak([(object[0] + " is " + str(round(object[1], 1)) + " meters and " + object[2])
-    #        for object in objects_info])
+    text_to_read = "".join([("The " + object[0] + " is " + str(round(object[1], 1)) + " meters away and is in the " + object[2] + " direction.")
+                            for object in objects_speak])
+    print(text_to_read)
+    gtts_speak(text_to_read)
+
+
+    
+
+    #espeak(str(num_objects) + " were found.")
+    # espeak([("The " + object[0] + " is " + str(round(object[1], 1)) + " meters away and is to the " + object[2] + " direction.")
+    #       for object in objects_speak], save=True)
 
     # led.toggle()
     #print("Look at that TV")
@@ -111,9 +144,12 @@ def inference_wrapper(class_to_remove, pipeline, interpreter, input_details, out
                                  width, height, min_conf_threshold, labels)
 
 
-def espeak(texttospeak):
+def espeak(texttospeak, save=False):
     s = '"{input_string}"'.format(input_string=texttospeak)
-    os.system('espeak -s 150 ' + s + ' --stdout > audio.wav')
+    if save:
+        os.system('espeak -s 150 ' + s + ' --stdout > audio.wav')
+    else:
+        os.system('espeak -s 150 ' + s)
 
 
 def detect_objects(class_to_remove, pipeline, interpreter, input_details, output_details, freq, frame_rate_calc, colors_hash, width, height, min_conf_threshold, labels):
@@ -445,19 +481,25 @@ def main():
     }
 
     # Enable PI I/O
-    led1 = LED(14)
-    led2 = LED(15)
-    led3 = LED(18)
-    bled = LED(23)
-    button = Button(24)
+    #led1 = LED(14)
+    #led2 = LED(15)
+    #led3 = LED(18)
+    #bled = LED(23)
+    #button = Button(24)
     # END SETTING UP HW I/O
     button.when_pressed = inference_wrapper(class_to_remove, pipeline, interpreter, input_details,
                                             output_details, freq, frame_rate_calc, colors_hash,
                                             width, height, min_conf_threshold, labels)
+    
     try:
-
+        print("Ready for user input:\n")
         while True:
             #print("Waiting for input...")
+            frames = pipeline.wait_for_frames()
+            depth = frames.get_depth_frame()
+
+            dist = depth.get_distance(int(width/2), int(height/2))
+            turn_on(dist, motor1, motor2, motor3)
             pass
     except Exception as e:
         print(e)
